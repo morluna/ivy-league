@@ -1,0 +1,12 @@
+*
+!requirements.txt
+!pickleball/
+!pickleball/*.py
+!static/
+!static/*.html
+!static/*.css
+!static/*.js
+!wsgi.py
+!Dockerfile
+!scripts/
+!scripts/*.py

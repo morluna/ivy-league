@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: rally-pickleball
+    runtime: docker
+    plan: starter
+    numInstances: 1
+    healthCheckPath: /healthz
+    autoDeployTrigger: 'off'
+    disk:
+      name: rally-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: PUBLIC_ORIGIN
+        sync: false
+      - key: DATABASE_PATH
+        value: /data/sessions.sqlite3
