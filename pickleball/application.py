@@ -12,9 +12,12 @@ class AppError(ValueError):
         self.status = status
 
 class Sessions:
-    def __init__(self, repository, clock, realtime):
+    def __init__(self, repository, clock, realtime, admin_key=None):
         self.repo, self.clock, self.realtime = repository, clock, realtime
         self.lock = threading.RLock()
+        if admin_key is not None and len(admin_key) < 32:
+            raise ValueError('SESSION_ADMIN_KEY must contain at least 32 characters.')
+        self.admin_hash = digest(admin_key) if admin_key else None
 
     def _name(self, value):
         if not isinstance(value, str):
@@ -44,6 +47,7 @@ class Sessions:
         result.pop('organizer_token')
         for p in result['players']:
             p.pop('token')
+        result['status'] = 'closed' if s['timer']['state'] == 'finished' else 'open'
         result['server_now'] = self.clock.now()
         return result
 
@@ -70,14 +74,32 @@ class Sessions:
         count = s['duration'] // s['length']
         s['rounds'] = frozen + schedule(ids, s['courts'], count - len(frozen), s['seed'], frozen)
 
+    def _close(self, s, by):
+        if s['timer']['state'] != 'finished':
+            s['timer'].update(state='finished', started_at=None, remaining=0)
+            s.update(closed_at=self.clock.now(), closed_by=by)
+            self._save(s)
+        return dict(session=self._view(s))
+
+    def force_end(self, sid, token):
+        # Owner authority is separate from every organizer/participant capability.
+        if not self.admin_hash or not matches(token, self.admin_hash):
+            raise AppError('Owner access required.', 403)
+        with self.lock:
+            return self._close(self._load(sid), 'owner')
+
     def mutate(self, sid, action, token=None, **data):
         with self.lock:
             s = self._load(sid)
             organizer = bool(token) and matches(token, s['organizer_token'])
             actor = next((p for p in s['players'] if token and matches(token, p['token'])), None)
+            if action == 'end-session':
+                if not organizer:
+                    raise AppError('Only the organizer can end the session.', 403)
+                return self._close(s, 'organizer')
+            if s['timer']['state'] == 'finished':
+                raise AppError('This session has ended and is read-only.', 409)
             if action == 'join':
-                if s['timer']['state'] == 'finished':
-                    raise AppError('This session has finished.')
                 if actor:
                     # Idempotent retries return the same identity, including after departure.
                     return dict(session=self._view(s), token=token, player_id=actor['id'])
@@ -133,6 +155,8 @@ class Sessions:
                     if timer['state'] not in ('running', 'paused'):
                         raise AppError('There is no active round.')
                     timer.update(state='finished' if s['current'] + 1 == len(s['rounds']) else 'ended', remaining=0, started_at=None)
+                    if timer['state'] == 'finished':
+                        s.update(closed_at=now, closed_by='completed')
                 else:
                     raise AppError('Unknown action.')
             self._save(s)

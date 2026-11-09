@@ -76,6 +76,18 @@ class SupabaseTests(unittest.TestCase):
         loser=next(name for status,name in outcomes if status==409)
         self.app.mutate(sid,'join',name=loser)
         self.assertEqual(len(self.app.get(sid)['players']),3)
+    def test_owner_closure_persists_and_rejects_stale_writer(self):
+        key='test-owner-key-for-cloud-closure-123456789'
+        owner=Sessions(self.repo,Clock(),SnapshotRealtime(),admin_key=key)
+        created=owner.create('Host');sid=created['session']['id']
+        stale=self.repo.get(sid);stale['revision']+=1
+        closed=owner.force_end(sid,key)['session']
+        with self.assertRaises(RepositoryConflict):self.repo.save(stale,expected_revision=1)
+        restarted=Sessions(self.repo,owner.clock,SnapshotRealtime(),admin_key=key)
+        self.assertEqual(restarted.get(sid),closed)
+        with self.assertRaises(AppError) as error:restarted.mutate(sid,'join',name='Late')
+        self.assertEqual(error.exception.status,409)
+
     def test_query_encoding_missing_and_no_redirects(self):
         self.assertIsNone(self.repo.get('x&select=organizer_token'))
         query=parse_qs(urlparse(self.provider.requests[-1][0].full_url).query)

@@ -1,4 +1,5 @@
 # Free pilot. Supabase is required: no disk and no SQLite fallback.
+# Optional owner kill switch: set SESSION_ADMIN_KEY in Render secret settings.
 services:
   - type: web
     name: rally-pickleball

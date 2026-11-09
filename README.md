@@ -45,7 +45,7 @@ Open `http://YOUR-COMPUTER-LAN-IP:8000` on **all** devices, including the organi
 ## Architecture
 
 - `pickleball/domain.py`: pure seeded scheduling and configuration validation. Explicit players, court count, round count, seed and historical rounds go in; rounds come out. No wall clock, persistence or global random state.
-- `pickleball/application.py`: create/read/join/leave/settings/start/pause/resume/end use cases; capability permissions, validation, locking and future-only rescheduling.
+- `pickleball/application.py`: create/read/join/leave/settings/start/pause/resume/end-round/end-session use cases; capability permissions, validation, locking and future-only rescheduling.
 - `pickleball/ports.py`: modest repository, clock and realtime protocols.
 - `pickleball/adapters.py`: isolated memory repository, persistent SQLite repository, environment selection, system clock and snapshot realtime seam.
 - `pickleball/supabase.py`: optional server-only Supabase REST adapter with atomic revision checks.
@@ -62,7 +62,7 @@ Selection gives priority to players with fewer historical games. For an unchange
 
 ### Time and reconnect contract
 
-The authoritative timer stores `started_at`, `remaining` and state on the server. Clients estimate server offset from request midpoint and derive remaining time from timestamps; no shared decrement loop. Pause captures remaining seconds; resume assigns a new start timestamp. A full revisioned snapshot is polled every 1.5 seconds and refreshed on reconnect/foreground. Server restart preserves timer timestamps, so elapsed time continues while the server is down. At zero, the display clamps to zero; the organizer explicitly ends the round and starts the next. No automatic schedule advancement. A disconnected client retains its last view/timer and shows a connection warning; successful mutations require the server.
+The authoritative timer stores `started_at`, `remaining` and state on the server. Clients estimate server offset from request midpoint and derive remaining time from timestamps; no shared decrement loop. Pause captures remaining seconds; resume assigns a new start timestamp. A full revisioned snapshot is polled every 1.5 seconds and refreshed on reconnect/foreground. Server restart preserves timer timestamps, so elapsed time continues while the server is down. At zero, the display clamps to zero; the organizer explicitly ends the round and starts the next. Organizers can also end the whole session early. App owners can independently close any session through `/admin` using a separately configured `SESSION_ADMIN_KEY`. Closed sessions stop their timer and become read-only; history remains visible. No automatic schedule advancement. A disconnected client retains its last view/timer and shows a connection warning; successful mutations require the server.
 
 `SnapshotRealtime.publish` is deliberately a no-op: local clients pull durable snapshots, rather than depending on an ephemeral event queue. The port is a future notification seam, not an unnecessary local message broker.
 
@@ -83,4 +83,4 @@ The HTTP adapter rejects cross-origin browser writes and limits JSON body size. 
 
 ## Validation in this workspace
 
-29 Python tests and the JavaScript form regression check passed, including an actual local HTTP create/join/reconnect flow. Browser visual/interaction checks could not run because the browser access host was unavailable. No external services were deployed or provisioned.
+36 Python tests and the JavaScript form regression check passed, including an actual local HTTP create/join/reconnect flow. Browser visual/interaction checks could not run because the browser access host was unavailable. No external services were deployed or provisioned.

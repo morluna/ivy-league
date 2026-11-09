@@ -40,7 +40,7 @@ python3 -B -m unittest discover -s tests -v
 node tests/form-regression.mjs  # optional Node UI handler regression
 ```
 
-29 Python tests pass. Supabase tests use an in-process simulated provider with real request encoding and headers, plus concurrent application writers. They cover stale saves, duplicate creation semantics, reconnect, permissions, timer pause/resume, timeout/private errors, no write retries, malformed/oversized responses, redirect refusal and invalid configuration. Memory and SQLite implement the same compare-and-swap save contract.
+36 Python tests pass. Supabase tests use an in-process simulated provider with real request encoding and headers, plus concurrent application writers. They cover stale saves, duplicate creation semantics, reconnect, permissions, timer pause/resume, timeout/private errors, no write retries, malformed/oversized responses, redirect refusal and invalid configuration. Memory and SQLite implement the same compare-and-swap save contract.
 
 **Not yet verified:** the SQL migration and SQL permission tests against actual Postgres/Supabase, Docker/Gunicorn image execution, and live end-to-end hosting. This workspace has no Postgres, Docker or connected Supabase project. Browser visual QA is also pending. Do not treat the simulated provider tests as proof that a live project's permissions or configuration are correct.
 
@@ -79,3 +79,27 @@ The gateway includes body limits, JSON-only writes, an asset allowlist, same-ori
 Per-peer limits are 1,200 requests, 120 writes and 10 creates/minute. They reset on restart and may aggregate multiple users behind the hosting proxy because untrusted forwarding headers are not used. This is a small pilot, not a fully hardened public service.
 
 No scheduled backup job is enabled. Before relying on Supabase for important history, configure restricted external exports and test restore; do not assume the Free plan supplies managed backups. Existing SQLite backups remain available through `python3 -B scripts/backup.py SOURCE DESTINATION`. Do not upload the local SQLite file or tokens to Git. For a code rollback, use a prior commit/image; code rollback does not roll back database contents. This migration creates new tables/functions without altering the local database.
+
+## End sessions: organizer and app owner
+
+After deploying this version, an organizer sees **End session** alongside the round controls, including before the first round starts. Ending a round still advances normal play; ending the session stops all play immediately. A confirmation appears before closing.
+
+For your independent owner kill switch:
+
+1. Generate a long random key in your own Terminal, and keep it in your password manager:
+
+   ```sh
+   python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+   ```
+
+2. In Render -> service -> Environment, add `SESSION_ADMIN_KEY` with that value. Save and deploy the latest commit. Never paste this key into chat or Git. The Blueprint does not require it: when unset, owner termination is disabled. An explicitly configured key must have at least 32 characters.
+3. Open `https://rally-pickleball.onrender.com/admin`. Paste a session link (or ID), enter your owner key, and confirm **End session for everyone**. This works even when you do not have that session's organizer credential. It handles one session at a time; there is no public session directory or bulk close action.
+
+Owner and organizer closure share the same persisted lifecycle: stop the timer, record the closing time and authority, and block all further joins, departures, settings changes or timer controls. Repeated authorized end requests are idempotent. Existing naturally completed sessions also become read-only. Session history is retained; this is not deletion. Every connected client sees closure on its next successful poll; disconnected devices update on reconnect. A stale concurrent save returns 409 instead of reopening the session. The owner key cannot be used as an organizer/participant identity and is not saved in browser storage or sent in URLs.
+
+No database migration is needed for these additions: the existing JSON snapshot stores the closure metadata. The owner-page and organizer UI handlers have automated regression checks:
+
+```sh
+node tests/form-regression.mjs
+node tests/admin-regression.mjs
+```

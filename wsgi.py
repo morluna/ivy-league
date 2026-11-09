@@ -12,7 +12,7 @@ def create_app(repository=None, public_origin=None):
         raise ValueError('Set PUBLIC_ORIGIN to the public HTTPS address before starting production.')
     if repository is None:
         repository = repository_from_environment('/data/sessions.sqlite3')
-    gateway = Gateway(Sessions(repository,SystemClock(),SnapshotRealtime()),origin)
+    gateway = Gateway(Sessions(repository,SystemClock(),SnapshotRealtime(),admin_key=os.environ.get('SESSION_ADMIN_KEY')),origin)
     def application(environ,start_response):
         headers = {k[5:].lower().replace('_','-'):v for k,v in environ.items() if k.startswith('HTTP_')}
         headers['content-type'] = environ.get('CONTENT_TYPE','')

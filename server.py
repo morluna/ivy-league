@@ -1,5 +1,6 @@
 """Dependency-free local adapter. Use wsgi.py + Gunicorn for the hosted pilot."""
 import argparse
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from pickleball.application import Sessions
@@ -43,7 +44,7 @@ if __name__ == '__main__':
     parser.add_argument('--db', default=str(ROOT / 'sessions.sqlite3'))
     args = parser.parse_args()
     server = ThreadingHTTPServer((args.host,args.port),Handler)
-    server.app = Sessions(repository_from_environment(args.db),SystemClock(),SnapshotRealtime())
+    server.app = Sessions(repository_from_environment(args.db),SystemClock(),SnapshotRealtime(),admin_key=os.environ.get('SESSION_ADMIN_KEY'))
     server.gateway = Gateway(server.app)
     print('Open http://localhost:%s — Ctrl+C to stop' % args.port,flush=True)
     try:

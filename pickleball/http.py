@@ -7,7 +7,7 @@ from .security import RateLimiter
 from .ports import StorageUnavailable
 
 STATIC = Path(__file__).resolve().parent.parent / 'static'
-ASSETS = {'/':('index.html','text/html; charset=utf-8'), '/index.html':('index.html','text/html; charset=utf-8'), '/app.js':('app.js','text/javascript; charset=utf-8'), '/style.css':('style.css','text/css; charset=utf-8')}
+ASSETS = {'/':('index.html','text/html; charset=utf-8'), '/index.html':('index.html','text/html; charset=utf-8'), '/app.js':('app.js','text/javascript; charset=utf-8'), '/style.css':('style.css','text/css; charset=utf-8'), '/admin':('admin.html','text/html; charset=utf-8'), '/admin.js':('admin.js','text/javascript; charset=utf-8')}
 
 class Gateway:
     def __init__(self, app, public_origin=None, limiter=None):
@@ -55,6 +55,11 @@ class Gateway:
                 if not self.limiter.allow((ip,'create'),10):
                     raise AppError('Too many new sessions. Try again in a minute.',429)
                 result = self.app.create(**data)
+            elif path.startswith('/api/admin/sessions/') and len(path.split('/')) == 6 and path.endswith('/end'):
+                if not self.limiter.allow((ip,'owner'),10):
+                    raise AppError('Too many owner requests. Try again in a minute.',429)
+                token = headers.get('authorization','').removeprefix('Bearer ')
+                result = self.app.force_end(path.split('/')[4],token)
             elif path.startswith('/api/sessions/') and len(path.split('/')) == 5:
                 _, _, _, sid, action = path.split('/')
                 if 'token' in data:
