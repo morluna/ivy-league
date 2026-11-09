@@ -15,6 +15,9 @@ if __name__ == '__main__':
             os.chown(path.parent,user.pw_uid,user.pw_gid)
             if path.exists():
                 os.chown(path,user.pw_uid,user.pw_gid)
+        # setuid does not update inherited root home/user variables.
+        # Gunicorn uses HOME for its control socket directory.
+        os.environ.update(HOME=user.pw_dir, USER=user.pw_name, LOGNAME=user.pw_name)
         os.setgroups([])
         os.setgid(user.pw_gid)
         os.setuid(user.pw_uid)

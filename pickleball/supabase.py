@@ -17,7 +17,7 @@ class SupabaseRepository:
         parsed = urlparse(url)
         if (parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password
                 or parsed.path not in ('','/') or parsed.query or parsed.fragment):
-            raise ValueError('SUPABASE_URL must be an HTTPS project origin.')
+            raise ValueError('Set SUPABASE_URL to the project HTTPS URL (https://<project-ref>.supabase.co), not the dashboard URL or /rest/v1 endpoint.')
         if not isinstance(secret,str) or not secret.startswith('sb_secret_') or any(c.isspace() for c in secret):
             raise ValueError('Set SUPABASE_SECRET_KEY to a server-side sb_secret_ key.')
         self.url, self.secret, self.timeout = url.rstrip('/'), secret, timeout
