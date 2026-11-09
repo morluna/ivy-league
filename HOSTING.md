@@ -1,43 +1,50 @@
-# Online pilot preparation
+# Free online pilot: Render + Supabase
 
-No hosting account, external database, billable resource, or deployment has been created. Local operation remains `python3 -B server.py`.
+Source repository: https://github.com/morluna/ivy-league (SSH configured). No cloud project or deployment has been created. SQLite remains the default for `python3 -B server.py`.
 
-## Two options
+## What is ready
 
-**Lowest implementation effort:** Render Starter plus a persistent disk, using the included `render.yaml`. This is a PAID configuration: approximately $7/month compute plus $0.25/month for a 1 GB disk, before tax and usage overages. Hobby currently includes 5 GB/month outbound bandwidth. Verify pricing in the account before purchasing: https://render.com/pricing and https://render.com/docs/outbound-bandwidth .
+`render.yaml` now selects **Render Free** and **Supabase storage** with no disk. `render-paid.yaml` retains the optional paid SQLite configuration; do not apply it for the free pilot.
 
-**Free pilot:** Render Free plus Supabase Free for persistent data. Render Free supplies 750 instance-hours per workspace/month, sleeps after 15 minutes without traffic, and cannot attach a disk. Supabase Free currently includes a 500 MB database and 5 GB egress, and can pause after a week of low activity. See https://render.com/docs/free and https://supabase.com/pricing . This option requires a Supabase repository adapter and transactional concurrency tests before publishing. It is NOT enabled in the current source. Do not change the included Blueprint to `plan: free` while keeping SQLite: local files are ephemeral and sessions would be lost.
+Phones -> Render HTTPS -> Python/Gunicorn -> Supabase Data API -> Postgres.
 
-The user is considering the free route; do not apply the paid Blueprint without a deliberate paid-hosting choice.
+- `pickleball/supabase.py`: standard-library HTTPS adapter; credentials stay server-side.
+- `supabase/migrations/001_sessions.sql`: session table, RLS, restricted grants and an atomic revision-checking save function.
+- `supabase/tests/001_sessions.sql`: real database permission/CAS checks, with rollback of test data.
+- Explicit storage selection: incomplete Supabase configuration stops startup rather than falling back to ephemeral SQLite.
+- Existing seed scheduling, permissions, timers and snapshot polling are unchanged. No Supabase Auth or Realtime subscription is required yet.
 
-## Prepared production setup
+## Account setup and publishing
 
-Phones -> HTTPS managed by host -> Gunicorn -> shared application layer -> SQLite on `/data`.
+1. Create a **Free** Supabase project at https://supabase.com/dashboard . Keep its database password in your password manager; the app does not need that password.
+2. In the project's SQL Editor, run `supabase/migrations/001_sessions.sql` once. Then run `supabase/tests/001_sessions.sql`; it must complete without errors. If the first migration already succeeded, do not reapply it. A failed migration rolls back as a unit.
+3. Find the project HTTPS URL and create/copy a server **secret API key** (`sb_secret_...`). Do not use the publishable key or paste the secret into chat, GitHub, client JS, or the public URL. The adapter deliberately accepts the current secret-key format, not legacy JWT keys. See https://supabase.com/docs/guides/getting-started/api-keys .
+4. Create a Render account at https://dashboard.render.com and connect the `morluna/ivy-league` GitHub repository. Create a **Blueprint** using `render.yaml`. Verify it shows `plan: free`, no disk and no paid database before creating resources.
+5. Enter only these secret settings in Render:
 
-The Docker image uses Python 3.12 and a pinned Gunicorn version. It initializes persistent directory ownership, then drops root privileges before starting the server. It runs exactly one worker process and eight request threads; **do not increase instances or workers** while using the in-process mutation lock. Persistent disks also mean brief restart downtime during deploys on Render.
+   | Setting | Value |
+   | --- | --- |
+   | `SUPABASE_URL` | The project's HTTPS origin, such as `https://your-project.supabase.co` |
+   | `SUPABASE_SECRET_KEY` | The server-only `sb_secret_...` key |
 
-Set `PUBLIC_ORIGIN` to the exact public origin, such as `https://rally-example.onrender.com`, with no trailing slash. The app fails closed without it in production. Cross-origin writes are rejected. TLS terminates at the host; the internal HTTP listener must not be exposed independently. Do not trust client-supplied forwarding headers as authentication or client identity. Current limits use the direct peer IP; behind a shared reverse proxy, limits may apply to a group of visitors together. This conservative limit is suitable only for the small pilot; tune at the trusted host edge before broader use.
+   `STORAGE_BACKEND=supabase` is in the Blueprint. The app takes its public HTTPS origin from Render's automatic `RENDER_EXTERNAL_URL`. A custom domain later requires setting `PUBLIC_ORIGIN` explicitly to the exact origin with no trailing slash. See https://render.com/docs/environment-variables .
+6. Deploy and check `https://YOUR-SERVICE.onrender.com/healthz`: it must return `{"status":"ok"}`. The probe verifies table readability, not merely process liveness. Migration, permissions and writes must still pass the checks below.
+7. Create a **fresh** session over HTTPS and join from a second browser or phone on mobile data. Start with four players; test pause/resume, late join, departure, reconnect and organizer restrictions. Restart Render and verify the same session survives. Local SQLite sessions and local browser identities do not automatically migrate to the new origin.
 
-Protections included:
+Git pushes do not automatically deploy: `autoDeployTrigger` is off. No deployment or account credentials have been configured by this code change.
 
-- Capability hashes in durable state. Existing SQLite plaintext tokens are automatically migrated without changing browser identities. Legacy snapshots/backups can still contain old plaintext values: restrict and rotate those backups appropriately.
-- Server-side organizer/self-removal authorization, bounded bodies, JSON-only writes, static asset allowlist and private errors.
-- Per-peer limits: 1,200 requests, 120 writes and 10 session creations per minute. In-process limits reset after a server restart. Not a distributed abuse protection system.
-- CSP, HTTPS HSTS, anti-framing, no-referrer headers; API snapshots are not cached. Access logs do not disclose session links.
-- `/healthz` checks storage readability and returns no session data.
-
-Browser capabilities remain in localStorage. CSP reduces injection risks, but this does not provide HttpOnly-cookie protection or account recovery. A session URL permits viewing and joining; treat the URL as a group invitation. No existing local database is uploaded by the Docker build.
-
-## Local checks
+## Local verification
 
 ```sh
 python3 -B -m unittest discover -s tests -v
-node tests/form-regression.mjs  # optional Node runtime for UI handler regression
+node tests/form-regression.mjs  # optional Node UI handler regression
 ```
 
-The Python suite includes the production WSGI gateway directly, HTTPS-origin behavior, authorization, capability migration, rate-limit expiry, health checks, malformed/oversized requests, backup/restore, plus scheduling/application/HTTP tests.
+28 Python tests pass. Supabase tests use an in-process simulated provider with real request encoding and headers, plus concurrent application writers. They cover stale saves, duplicate creation semantics, reconnect, permissions, timer pause/resume, timeout/private errors, no write retries, malformed/oversized responses, redirect refusal and invalid configuration. Memory and SQLite implement the same compare-and-swap save contract.
 
-With Docker installed, check the actual image before deployment:
+**Not yet verified:** the SQL migration and SQL permission tests against actual Postgres/Supabase, Docker/Gunicorn image execution, and live end-to-end hosting. This workspace has no Postgres, Docker or connected Supabase project. Browser visual QA is also pending. Do not treat the simulated provider tests as proof that a live project's permissions or configuration are correct.
+
+For a local production image check when Docker is available, test SQLite in an isolated volume without cloud credentials:
 
 ```sh
 docker build -t rally-pilot .
@@ -45,22 +52,30 @@ docker run --rm -p 8001:8000 -e PUBLIC_ORIGIN=https://rally.example -v rally-dat
 curl http://localhost:8001/healthz
 ```
 
-The HTTP test address above is for local inspection of health/static content. Browser mutations intentionally reject an HTTP localhost Origin against the configured HTTPS production origin. An end-to-end production check must use the real HTTPS origin. Docker and the production Gunicorn runtime were unavailable in this workspace, so image execution is still a required pre-deployment check. Browser visual QA remains pending because the browser access host was unavailable.
+This HTTP endpoint is for health/static inspection only. Browser writes intentionally reject a localhost HTTP origin against the production HTTPS origin. Test the Supabase configuration in staging using secret settings, never secrets in command arguments.
 
-## Publishing the paid option, if selected later
+## Consistency and failure behavior
 
-1. Put the source in a private Git repository, excluding SQLite, backups, browser tokens and local environments. Git credentials/hosting account are not currently connected in this workspace.
-2. In Render, connect that repository and review `render.yaml`. It provisions a paid Starter service with one 1 GB disk at `/data`. Automatic deploys are off.
-3. Set `PUBLIC_ORIGIN` to the actual generated HTTPS origin; `DATABASE_PATH` is already `/data/sessions.sqlite3`. Confirm the service and disk cost before activating billing.
-4. Deploy, check `/healthz`, create a fresh test session and join from a second device over mobile data. Confirm pause/resume/reconnect. Restart the service and verify the same session and permissions survive.
-5. Test a controlled backup/restore before the group relies on it. Keep the prior image/commit for code rollback; code rollback does not restore database state.
+A session snapshot is saved only if the database's current revision matches the revision read by the application. SQL performs this check and update in one transaction. Stale writers return HTTP 409 and must refresh/retry; they cannot erase the winning update. No blind upserts exist in the cloud adapter. The local SQLite adapter uses a write transaction for the same guarantee.
 
-## Backups
+Requests have a five-second provider timeout. Provider failures return a generic 503 without logging provider payloads or credentials. Writes are **not** automatically retried: a timeout may mean the save committed but its response was lost. Refresh before retrying. A lost create/join response can leave an orphan session or reserved name because request-level idempotency/recovery is not implemented yet. Already-identified participants can repeat joins with their existing browser capability.
 
-```sh
-python3 -B scripts/backup.py /data/sessions.sqlite3 /data/rally-backup-YYYY-MM-DD.sqlite3
-```
+The pilot retains one Gunicorn worker/eight threads. CAS protects database integrity across writers, but rate limits and notification hooks are process-local. Do not add replicas without shared abuse controls. The app stores authoritative timer timestamps; it does not depend on the server staying awake to decrement counters.
 
-This uses SQLite's consistent online backup API and integrity checking. Use a fresh filename and copy backups off the hosting disk into restricted storage. The helper is manual; no recurring backups or retention jobs have been provisioned. On paid Render, provider disk snapshots are an additional layer, not a substitute for a tested application backup.
+## Free limits and tradeoffs
 
-To restore: stop the only app instance, preserve the current database, replace it with a verified backup, set ownership for the application user, then restart and check `/healthz` and session access. Never overwrite an active SQLite database. Schedule and monitor backups before treating this as durable production service.
+Render Free: 750 instance-hours per workspace/month, sleeps after 15 idle minutes and has no persistent disk. The first visit after sleep can take longer and clients may need to retry. See https://render.com/docs/free .
+
+Supabase Free: currently 500 MB database, 5 GB egress and potential pausing after a week of low activity. See https://supabase.com/pricing . Limits are shared with other projects/services as described by the providers; verify account quotas before launch.
+
+Every active browser currently polls a full snapshot every 1.5 seconds, and every poll reads Supabase. Database outbound traffic therefore counts against quotas; monitor usage during the pilot rather than assuming the roster cap is a capacity guarantee. Push notifications, conditional reads and snapshot caching are later optimizations.
+
+## Security and backups
+
+Session capabilities are hashed before storage. Public snapshots exclude those hashes. RLS and revoked table/function grants prohibit direct browser-role access; only Render's secret key can call the storage API. The Python application enforces organizer and participant permissions before saving. Secret keys bypass RLS and must stay under server control.
+
+The gateway includes body limits, JSON-only writes, an asset allowlist, same-origin write checks, CSP, HSTS, anti-framing and no-referrer headers. Browser capabilities still live in localStorage, with no account recovery or HttpOnly-cookie protection. A session link allows viewing and joining, so share it with the group deliberately.
+
+Per-peer limits are 1,200 requests, 120 writes and 10 creates/minute. They reset on restart and may aggregate multiple users behind the hosting proxy because untrusted forwarding headers are not used. This is a small pilot, not a fully hardened public service.
+
+No scheduled backup job is enabled. Before relying on Supabase for important history, configure restricted external exports and test restore; do not assume the Free plan supplies managed backups. Existing SQLite backups remain available through `python3 -B scripts/backup.py SOURCE DESTINATION`. Do not upload the local SQLite file or tokens to Git. For a code rollback, use a prior commit/image; code rollback does not roll back database contents. This migration creates new tables/functions without altering the local database.

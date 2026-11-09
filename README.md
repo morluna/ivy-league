@@ -47,11 +47,12 @@ Open `http://YOUR-COMPUTER-LAN-IP:8000` on **all** devices, including the organi
 - `pickleball/domain.py`: pure seeded scheduling and configuration validation. Explicit players, court count, round count, seed and historical rounds go in; rounds come out. No wall clock, persistence or global random state.
 - `pickleball/application.py`: create/read/join/leave/settings/start/pause/resume/end use cases; capability permissions, validation, locking and future-only rescheduling.
 - `pickleball/ports.py`: modest repository, clock and realtime protocols.
-- `pickleball/adapters.py`: isolated memory repository, persistent SQLite repository, system clock and snapshot realtime seam.
+- `pickleball/adapters.py`: isolated memory repository, persistent SQLite repository, environment selection, system clock and snapshot realtime seam.
+- `pickleball/supabase.py`: optional server-only Supabase REST adapter with atomic revision checks.
 - `server.py`: HTTP transport and static files; standard-library threaded server.
 - `static/`: responsive vanilla HTML/CSS/JS. No framework/build tool or third-party assets.
 
-All mutations run under a single application lock, so concurrent local requests cannot lose roster or timer updates. SQLite stores complete revisioned session snapshots. This is intentionally a **single-process** app; a multi-worker deployment must replace this lock with transactional concurrency control.
+All mutations use a local application lock. Each adapter also compares the expected revision atomically before saving, preventing stale writers from overwriting newer state across processes. A conflict returns HTTP 409 and asks the client to refresh and retry. The pilot still runs one worker because rate limits are process-local.
 
 ### Scheduling contract
 
@@ -69,12 +70,12 @@ The authoritative timer stores `started_at`, `remaining` and state on the server
 
 Each browser receives an opaque random capability. Only the organizer can change settings or control rounds; participants can remove only themselves, and organizers can remove anyone. Public snapshots expose names and schedules, never capabilities. Durable capabilities are stored as SHA-256 digests; existing SQLite records migrate on startup. Names are normalized, length-limited and rendered using textContent. Joins with an existing capability are idempotent; conflicting names are rejected. Without the capability, a repeated name cannot claim an existing identity. Clearing browser storage loses that capability; recovery/account linking is deferred. This version does not transfer organizer rights, restore departed players, store scores, book courts, or provide native lock-screen Live Activities.
 
-The HTTP adapter rejects cross-origin browser writes and limits JSON body size. It is a local development server, not an Internet-facing production service. No telemetry, outbound requests, payment flows, provider credentials or booking calls exist.
+The HTTP adapter rejects cross-origin browser writes and limits JSON body size. It is a local development server, not an Internet-facing production service. The local default has no telemetry or outbound requests. Selecting Supabase explicitly enables server-side provider requests; its secret is never sent to the browser. No payment flows or booking calls exist.
 
 ## Phased integrations — nothing provisioned
 
 1. **Local acceptance:** verify the mobile UI on real phones, tune fairness using realistic group rosters, and settle session lifecycle and organizer recovery. Keep pure domain/application tests as the acceptance suite. Browser automation is the next testing addition when a browser runtime is available.
-2. **Supabase persistence:** replace the repository with a transactional adapter, use revision compare-and-swap or a row lock, and keep capability verification on a trusted server. Add migrations, authorization policies, adapter contract tests and concurrent-update tests before switching. Keep memory/SQLite as local defaults. Add optional accounts without requiring them for joins.
+2. **Supabase persistence (implemented, not provisioned):** optional REST repository, SQL migration, service-role-only permissions, compare-and-swap RPC and offline provider contract tests. Apply and verify SQL in a real project before publishing. Memory/SQLite remain local defaults. Optional accounts remain deferred.
 3. **Supabase realtime:** implement publish/subscription notifications that trigger snapshot refetches. Retain polling fallback and reconnect reconciliation. Test duplicate/out-of-order notifications and stale revisions. Keep authoritative server timestamps and validate clock drift.
 4. **Hosting:** package the HTTP/application layer for the selected host, add HTTPS, secure capability handling, monitoring, backups, rate limits and environment configuration. Test staging explicitly before any production release. Hosting choice and service limits should be verified at integration time; this MVP has no service costs.
 5. **CourtReserve:** first verify supported API access, venue permissions and booking terms with the provider. Start with venue links/manual booking metadata. Add a separate booking adapter only when supported access is established. Model availability, booking conflicts, timeouts, retries, idempotency, cancellation and explicit booking confirmation independently of scheduling. Do not scrape credentials or assume a public booking API exists.
@@ -82,4 +83,4 @@ The HTTP adapter rejects cross-origin browser writes and limits JSON body size. 
 
 ## Validation in this workspace
 
-20 Python tests and the JavaScript form regression check passed, including an actual local HTTP create/join/reconnect flow. Browser visual/interaction checks could not run because the browser access host was unavailable. No external services were deployed or provisioned.
+28 Python tests and the JavaScript form regression check passed, including an actual local HTTP create/join/reconnect flow. Browser visual/interaction checks could not run because the browser access host was unavailable. No external services were deployed or provisioned.

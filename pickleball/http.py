@@ -4,6 +4,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from .application import AppError
 from .security import RateLimiter
+from .ports import StorageUnavailable
 
 STATIC = Path(__file__).resolve().parent.parent / 'static'
 ASSETS = {'/':('index.html','text/html; charset=utf-8'), '/index.html':('index.html','text/html; charset=utf-8'), '/app.js':('app.js','text/javascript; charset=utf-8'), '/style.css':('style.css','text/css; charset=utf-8')}
@@ -63,6 +64,8 @@ class Gateway:
             else:
                 raise AppError('Not found.',404)
             return self.json(200,result)
+        except StorageUnavailable:
+            return self.json(503,{'error':'Session storage is unavailable. Refresh before retrying a change.'})
         except AppError as e:
             return self.json(e.status,{'error':str(e)})
         except (ValueError,TypeError,KeyError):

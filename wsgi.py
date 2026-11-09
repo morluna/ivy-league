@@ -1,20 +1,17 @@
-"""Single-process production entry point; PUBLIC_ORIGIN is mandatory."""
+"""Single-process production entry point; an explicit HTTPS origin is required."""
 import os
 from http import HTTPStatus
-from pathlib import Path
 from pickleball.application import Sessions
-from pickleball.adapters import SQLiteRepository, SystemClock, SnapshotRealtime
+from pickleball.adapters import repository_from_environment, SystemClock, SnapshotRealtime
 from pickleball.http import Gateway, SECURITY_HEADERS
 
 
 def create_app(repository=None, public_origin=None):
-    origin = public_origin or os.environ.get('PUBLIC_ORIGIN')
+    origin = public_origin or os.environ.get('PUBLIC_ORIGIN') or os.environ.get('RENDER_EXTERNAL_URL')
     if not origin:
         raise ValueError('Set PUBLIC_ORIGIN to the public HTTPS address before starting production.')
     if repository is None:
-        path = Path(os.environ.get('DATABASE_PATH','/data/sessions.sqlite3'))
-        path.parent.mkdir(parents=True,exist_ok=True)
-        repository = SQLiteRepository(str(path))
+        repository = repository_from_environment('/data/sessions.sqlite3')
     gateway = Gateway(Sessions(repository,SystemClock(),SnapshotRealtime()),origin)
     def application(environ,start_response):
         headers = {k[5:].lower().replace('_','-'):v for k,v in environ.items() if k.startswith('HTTP_')}

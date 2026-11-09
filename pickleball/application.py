@@ -4,6 +4,7 @@ import threading
 import unicodedata
 from .domain import schedule, validate
 from .security import digest, matches
+from .ports import RepositoryConflict
 
 class AppError(ValueError):
     def __init__(self, message, status=400):
@@ -30,8 +31,12 @@ class Sessions:
         return s
 
     def _save(self, s):
+        previous = s['revision']
         s['revision'] += 1
-        self.repo.save(s)
+        try:
+            self.repo.save(s, expected_revision=previous)
+        except RepositoryConflict:
+            raise AppError('The session changed on another device. Refresh and try again.', 409) from None
         self.realtime.publish(s['id'], s['revision'])
 
     def _view(self, s):

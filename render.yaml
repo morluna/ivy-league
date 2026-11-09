@@ -1,17 +1,15 @@
+# Free pilot. Supabase is required: no disk and no SQLite fallback.
 services:
   - type: web
     name: rally-pickleball
     runtime: docker
-    plan: starter
-    numInstances: 1
+    plan: free
     healthCheckPath: /healthz
     autoDeployTrigger: 'off'
-    disk:
-      name: rally-data
-      mountPath: /data
-      sizeGB: 1
     envVars:
-      - key: PUBLIC_ORIGIN
+      - key: STORAGE_BACKEND
+        value: supabase
+      - key: SUPABASE_URL
         sync: false
-      - key: DATABASE_PATH
-        value: /data/sessions.sqlite3
+      - key: SUPABASE_SECRET_KEY
+        sync: false
