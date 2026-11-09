@@ -12,7 +12,7 @@ def create_app(repository=None, public_origin=None):
         raise ValueError('Set PUBLIC_ORIGIN to the public HTTPS address before starting production.')
     if repository is None:
         repository = repository_from_environment('/data/sessions.sqlite3')
-    gateway = Gateway(Sessions(repository,SystemClock(),SnapshotRealtime(),admin_key=os.environ.get('SESSION_ADMIN_KEY')),origin)
+    gateway = Gateway(Sessions(repository,SystemClock(),SnapshotRealtime(),admin_key=os.environ.get('SESSION_ADMIN_KEY'),read_cache_seconds=3),origin)
     def application(environ,start_response):
         headers = {k[5:].lower().replace('_','-'):v for k,v in environ.items() if k.startswith('HTTP_')}
         headers['content-type'] = environ.get('CONTENT_TYPE','')
@@ -27,7 +27,9 @@ def create_app(repository=None, public_origin=None):
         except Exception:
             # Avoid leaking database paths or credential-bearing state to clients.
             status, response_headers, payload = gateway.json(500,{'error':'The server could not complete this request.'})
-        response_headers = {**SECURITY_HEADERS,**response_headers,'Content-Length':str(len(payload)), 'Strict-Transport-Security':'max-age=31536000'}
+        response_headers = {**SECURITY_HEADERS,**response_headers,'Strict-Transport-Security':'max-age=31536000'}
+        if status != 304:
+            response_headers['Content-Length'] = str(len(payload))
         start_response('%s %s' % (status,HTTPStatus(status).phrase),list(response_headers.items()))
         return [payload]
     return application

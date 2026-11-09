@@ -1,0 +1,42 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import vm from 'node:vm';
+function node(){return {textContent:'',hidden:false,children:[],setAttribute(){},append(...v){this.children.push(...v)},replaceChildren(...v){this.children=v},contains(){return false}};}
+function form(values){const inputs=Object.fromEntries(Object.entries(values).map(([k,v])=>[k,{value:String(v)}]));return {...node(),elements:{namedItem:k=>inputs[k]}};}
+const nodes=new Map([['create',form({name:'Host',courts:2,duration:120,length:'',play_format:'singles'})],['settings',form({courts:2,duration:120,length:'',play_format:'singles'})],['add-player',form({name:'Guest'})]]);
+const get=id=>{if(!nodes.has(id))nodes.set(id,node());return nodes.get(id)};
+const store=new Map();let now=1000000,snapshot,calls=[];
+const context=vm.createContext({URLSearchParams,AbortSignal,Date:{now:()=>now},document:{getElementById:get,createElement:node,addEventListener(){},hidden:false},location:{search:''},history:{pushState(){}},navigator:{},window:{addEventListener(){},confirm:()=>true},localStorage:{getItem:k=>store.get(k),setItem:(k,v)=>store.set(k,v)},setTimeout(){},clearTimeout(){},setInterval(){},fetch:async(path,options)=>{
+ const data=JSON.parse(options.body);calls.push({path,data});
+ if(path==='/api/sessions')snapshot={...data,id:'manual',revision:1,current:-1,rounds:[],players:[{id:'host',name:'Host',active:true}],timer:{state:'idle',remaining:null,started_at:null}};
+ if(path.endsWith('/add-player'))snapshot={...snapshot,revision:snapshot.revision+1,players:[...snapshot.players,{id:'guest',name:data.name,active:true}],rounds:[{matches:[{court:1,teams:[['host'],['guest']]}],resting:[]}]};
+ if(path.endsWith('/start')||path.endsWith('/next'))snapshot={...snapshot,current:snapshot.current+1,revision:snapshot.revision+1,timer:{state:'running',started_at:now/1000,remaining:null,elapsed:0}};
+ if(path.endsWith('/end-session'))snapshot={...snapshot,revision:snapshot.revision+1,closed_by:'organizer',timer:{state:'finished',started_at:null,remaining:0,elapsed:now/1000-snapshot.timer.started_at}};
+ return {ok:true,json:async()=>path==='/api/sessions'?{session:{...snapshot,server_now:now/1000},token:'organizer',player_id:'host'}:{session:{...snapshot,server_now:now/1000}}};
+}});
+const run=code=>vm.runInContext(code,context);
+run(await readFile(new URL('../static/app.js',import.meta.url),'utf8'));
+await get('create').onsubmit({preventDefault(){},target:get('create')});
+assert.equal(calls[0].data.length,null);
+assert.equal(calls[0].data.play_format,'singles');
+assert(get('summary').textContent.startsWith('Singles'));
+assert(get('notice').textContent.includes('at least 2 players'));
+await get('add-player').onsubmit({preventDefault(){},target:get('add-player')});
+assert(get('notice').textContent.includes('Using 1'));
+assert.equal(get('schedule').children[0].children[1].children[1].textContent,'Host');
+assert.equal(get('schedule').children[0].children[1].children[3].textContent,'Guest');
+assert.equal(get('settings').elements.namedItem('play_format').value,'singles');
+assert.equal(get('settings').elements.namedItem('length').value,'');
+assert(get('summary').textContent.includes('Manual rounds'));
+assert.equal(get('countdown').textContent,'00:00');
+await run("action('start')");now+=65000;run('tick()');
+assert.equal(get('countdown').textContent,'01:05');
+assert(!get('controls').children.some(b=>b.textContent==='Pause'));
+const next=get('controls').children.find(b=>b.textContent==='Next round');assert(next);
+await next.onclick();assert.equal(get('countdown').textContent,'00:00');
+assert.equal(get('round-label').textContent,'ROUND 2');
+now+=22000;run('tick()');assert.equal(get('countdown').textContent,'00:22');
+await run("action('end-session')");now+=500000;run('tick()');
+assert.equal(get('countdown').textContent,'00:22');
+assert.equal(get('round-label').textContent,'SESSION ENDED');
+console.log('PASS: singles form selection, two-player waiting state, one-player team labels, and manual timer controls.');

@@ -28,7 +28,7 @@ Phones -> Render HTTPS -> Python/Gunicorn -> Supabase Data API -> Postgres.
    | `SUPABASE_SECRET_KEY` | The server-only `sb_secret_...` key |
 
    `STORAGE_BACKEND=supabase` is in the Blueprint. The app takes its public HTTPS origin from Render's automatic `RENDER_EXTERNAL_URL`. A custom domain later requires setting `PUBLIC_ORIGIN` explicitly to the exact origin with no trailing slash. See https://render.com/docs/environment-variables .
-6. Deploy and check `https://YOUR-SERVICE.onrender.com/healthz`: it must return `{"status":"ok"}`. The probe verifies table readability, not merely process liveness. Migration, permissions and writes must still pass the checks below.
+6. Deploy and check `https://YOUR-SERVICE.onrender.com/healthz`: it must return `{"status":"ok"}`. The probe verifies table readability, not merely process liveness, with a 30-second successful-probe cache (5 seconds on failure). Migration, permissions and writes must still pass the checks below.
 7. Create a **fresh** session over HTTPS and join from a second browser or phone on mobile data. Start with four players; test pause/resume, late join, departure, reconnect and organizer restrictions. Restart Render and verify the same session survives. Local SQLite sessions and local browser identities do not automatically migrate to the new origin.
 
 Git pushes do not automatically deploy: `autoDeployTrigger` is off. No deployment or account credentials have been configured by this code change.
@@ -40,7 +40,7 @@ python3 -B -m unittest discover -s tests -v
 node tests/form-regression.mjs  # optional Node UI handler regression
 ```
 
-36 Python tests pass. Supabase tests use an in-process simulated provider with real request encoding and headers, plus concurrent application writers. They cover stale saves, duplicate creation semantics, reconnect, permissions, timer pause/resume, timeout/private errors, no write retries, malformed/oversized responses, redirect refusal and invalid configuration. Memory and SQLite implement the same compare-and-swap save contract.
+71 Python tests pass. Supabase tests use an in-process simulated provider with real request encoding and headers, plus concurrent application writers. They cover stale saves, duplicate creation semantics, reconnect, permissions, timer pause/resume, timeout/private errors, no write retries, malformed/oversized responses, redirect refusal and invalid configuration. Memory and SQLite implement the same compare-and-swap save contract.
 
 **Not yet verified:** the SQL migration and SQL permission tests against actual Postgres/Supabase, Docker/Gunicorn image execution, and live end-to-end hosting. This workspace has no Postgres, Docker or connected Supabase project. Browser visual QA is also pending. Do not treat the simulated provider tests as proof that a live project's permissions or configuration are correct.
 
@@ -68,7 +68,7 @@ Render Free: 750 instance-hours per workspace/month, sleeps after 15 idle minute
 
 Supabase Free: currently 500 MB database, 5 GB egress and potential pausing after a week of low activity. See https://supabase.com/pricing . Limits are shared with other projects/services as described by the providers; verify account quotas before launch.
 
-Every active browser currently polls a full snapshot every 1.5 seconds, and every poll reads Supabase. Database outbound traffic therefore counts against quotas; monitor usage during the pilot rather than assuming the roster cap is a capacity guarantee. Push notifications, conditional reads and snapshot caching are later optimizations.
+Visible browsers poll every 3 seconds during active/paused rounds and every 5 seconds otherwise. Hidden tabs and ended sessions stop polling; failed requests back off to 30 seconds. A bounded, process-local 3-second read cache coalesces viewers of the same session. Mutations bypass this cache, use CAS, then immediately refresh cached state; conflicts/uncertain writes invalidate it. Other-process changes can take up to the cache TTL plus the next browser poll to appear. Unchanged revisions return HTTP 304 with an authoritative timestamp, saving Render-to-browser payloads; this does not itself reduce Supabase traffic. The server cache does reduce Supabase reads/egress. Monitor usage rather than assuming the roster cap is a capacity guarantee. Supabase Realtime remains deferred.
 
 ## Security and backups
 
@@ -102,4 +102,29 @@ No database migration is needed for these additions: the existing JSON snapshot 
 ```sh
 node tests/form-regression.mjs
 node tests/admin-regression.mjs
+node tests/polling-regression.mjs
 ```
+
+## Traffic optimization review (local only)
+
+The supplied 100-entry log export contained 73 successful session reads, 26 health reads, and one dashboard request over approximately 106 seconds. Session-read median spacing was about 1.49 seconds; health-read median spacing was 5 seconds. Logs contain no response-byte totals, so this sample does not establish a bill or monthly egress. Current pricing includes unlimited API requests on Free, with 5 GB uncached egress: https://supabase.com/pricing . REST gateway logs are not Supabase Realtime message events.
+
+For 12 continuously visible clients over two hours, old 1.5-second polling implies 57,600 session reads. The new 3-second shared server cache caps unchanged-session polling at roughly 2,400 database reads per process over that interval, independent of viewer count, plus reads/writes for edits and health checks. This is an estimate from configured intervals, not a measured production saving. Ordinary single-viewer active polling falls from 40 to 20 requests/minute; health database probes fall from roughly 12 to 2 per minute. Cache entries are capped at 128 and never serve expired data after a failed refresh.
+
+All these changes remain local pending the user's review. The timer still derives time from server timestamps; it sends no timer-tick events. No additional provider or background service is introduced.
+
+## Manual round mode (local review)
+
+Round minutes are optional. Null/omitted round length selects manual mode: the authoritative `started_at` drives a count-up clock, and the organizer advances with **Next round**. Numeric round lengths keep the existing countdown controls. The manual preview starts with 12 rounds and grows one at a time past that preview, capped at 96 rounds; organizers end sessions explicitly. No SQL migration or provider configuration change is needed. Existing numeric-length sessions continue to work. Run `node tests/manual-rounds-regression.mjs` for the new UI handler check.
+
+## Court labels (local review)
+
+Organizers can edit one name per court in **Court names**, before or during play. Blank labels fall back to Court 1, Court 2, etc.; names must be distinct and at most 40 characters. Saving names updates labels across the displayed schedule, including historical rounds, without changing any court slot, teams, round index or timer. Closed sessions are read-only. Court count remains locked after play starts; before play, resizing preserves existing labels and gives new slots defaults.
+
+Numeric court slots remain stable internal identifiers, separate from editable names. This leaves room to attach venue/provider court IDs in a later CourtReserve integration without making names into identifiers. Existing sessions receive default labels automatically, and no database migration is required.
+
+## Singles and doubles (local review)
+
+Choose **Format** when creating a session: **Singles** needs two players per match (one on each side), and **Doubles** needs four (two on each side). Extra courts stay unused if there are not enough players to fill another match. Both formats support timed countdowns or manual count-up rounds, organizer roster edits, court labels and future-only rescheduling. Format can be changed in settings before the first round starts; it is locked afterward so existing match assignments remain consistent. Existing sessions default to doubles and need no migration.
+
+Singles rotations prioritize balanced game counts and varied opponents; doubles also optimize partner variety. The stable court slots and provider-storage format are unchanged. Run `node tests/singles-regression.mjs` for format-selection and singles match rendering checks.

@@ -27,7 +27,10 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             status, headers, payload = gateway.json(400,{'error':'Invalid request size.'})
         self.send_response(status)
-        for k,v in {**SECURITY_HEADERS,**headers,'Content-Length':str(len(payload))}.items():
+        response_headers = {**SECURITY_HEADERS,**headers}
+        if status != 304:
+            response_headers['Content-Length'] = str(len(payload))
+        for k,v in response_headers.items():
             self.send_header(k,v)
         self.end_headers()
         self.wfile.write(payload)
@@ -44,7 +47,7 @@ if __name__ == '__main__':
     parser.add_argument('--db', default=str(ROOT / 'sessions.sqlite3'))
     args = parser.parse_args()
     server = ThreadingHTTPServer((args.host,args.port),Handler)
-    server.app = Sessions(repository_from_environment(args.db),SystemClock(),SnapshotRealtime(),admin_key=os.environ.get('SESSION_ADMIN_KEY'))
+    server.app = Sessions(repository_from_environment(args.db),SystemClock(),SnapshotRealtime(),admin_key=os.environ.get('SESSION_ADMIN_KEY'),read_cache_seconds=3)
     server.gateway = Gateway(server.app)
     print('Open http://localhost:%s — Ctrl+C to stop' % args.port,flush=True)
     try:

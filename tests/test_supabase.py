@@ -44,7 +44,7 @@ class SupabaseTests(unittest.TestCase):
         self.repo=SupabaseRepository('https://test.supabase.co','sb_secret_TEST_ONLY',opener=self.provider)
         self.app=Sessions(self.repo,Clock(),SnapshotRealtime())
     def test_create_join_timer_and_restart(self):
-        result=self.app.create('Host');sid=result['session']['id'];token=result['token']
+        result=self.app.create('Host',length=10);sid=result['session']['id'];token=result['token']
         self.assertNotIn(token,json.dumps(self.provider.rows))
         for name in ('A','B','C'):self.app.mutate(sid,'join',name=name)
         self.app.mutate(sid,'start',token)

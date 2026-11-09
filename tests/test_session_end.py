@@ -13,7 +13,7 @@ class SessionEndTests(unittest.TestCase):
     def setUp(self):
         self.clock=Clock();self.repo=MemoryRepository()
         self.app=Sessions(self.repo,self.clock,SnapshotRealtime(),admin_key=OWNER_KEY)
-        self.created=self.app.create('Host');self.sid=self.created['session']['id'];self.token=self.created['token']
+        self.created=self.app.create('Host',length=10);self.sid=self.created['session']['id'];self.token=self.created['token']
         self.guest=self.app.mutate(self.sid,'join',name='Guest')
         for name in ('A','B'):self.app.mutate(self.sid,'join',name=name)
     def assert_closed(self,s):
